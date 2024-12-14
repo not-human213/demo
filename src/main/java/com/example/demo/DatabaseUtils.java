@@ -9,38 +9,60 @@ import org.springframework.web.bind.annotation.*;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+
 import org.springframework.jdbc.core.JdbcTemplate;
 
 
 public class DatabaseUtils {
-    public static DataSource getDataSource(String selectedDb, String databaseName) {
-        DriverManagerDataSource dataSource = new DriverManagerDataSource();
+    private static final Map<String, DataSource> dataSourceMap = new ConcurrentHashMap<>();
 
-        switch (selectedDb.toLowerCase()) {
-            case "mysql":
-                dataSource.setUrl("jdbc:mysql://localhost:3306/" + databaseName);
-                dataSource.setUsername("root");
-                dataSource.setPassword("Harshal@sql");
-                dataSource.setDriverClassName("com.mysql.cj.jdbc.Driver");
-                break;
-            case "postgres":
-                dataSource.setUrl("jdbc:postgresql://localhost:5432/" + databaseName);
-                dataSource.setUsername("root");
-                dataSource.setPassword("Harshal@sql");
-                dataSource.setDriverClassName("org.postgresql.Driver");
-                break;
-            case "mariadb":
-                dataSource.setUrl("jdbc:mariadb://localhost:3316/" + databaseName);
-                dataSource.setUsername("root");
-                dataSource.setPassword("Harshal@sql");
-                dataSource.setDriverClassName("org.mariadb.jdbc.Driver");
-                break;
-            default:
-                throw new IllegalArgumentException("Unsupported database type: " + selectedDb);
-        }
-
-        return dataSource;
+    /**
+     * Retrieves a DataSource based on dbType.
+     *
+     * @param dbType The type of the database (e.g., mysql, postgres, mariadb).
+     * @return The corresponding DataSource or null if not found.
+     */
+    public static DataSource getDataSource(String dbType) {
+        String key = dbType.toLowerCase();
+        return dataSourceMap.get(key);
     }
+
+    /**
+     * Adds a new DataSource to the dataSourceMap.
+     *
+     * @param dbType     The type of the database.
+     * @param dataSource The DataSource to be added.
+     */
+    public static void addDataSource(String dbType, DataSource dataSource) {
+        String key = dbType.toLowerCase();
+        dataSourceMap.putIfAbsent(key, dataSource);
+    }
+
+    /**
+     * Removes a DataSource from the dataSourceMap.
+     *
+     * @param dbType The type of the database.
+     * @return true if the DataSource was removed successfully, false otherwise.
+     */
+    public static boolean removeDataSource(String dbType) {
+        String key = dbType.toLowerCase();
+        return dataSourceMap.remove(key) != null;
+    }
+
+    /**
+     * Retrieves all existing database connections.
+     *
+     * @return A list of ConnectionInfo objects representing each connection.
+     */
+    public static List<ConnectionInfo> getAllConnections() {
+        List<ConnectionInfo> connections = new ArrayList<>();
+        for (String key : dataSourceMap.keySet()) {
+            connections.add(new ConnectionInfo(key));
+        }
+        return connections;
+    }
+
 
     public static List<String> getAllTables(DataSource dataSource) {
         JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);

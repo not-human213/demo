@@ -1,4 +1,3 @@
-// filepath: /c:/harshal/sql_explorer/demo/src/main/java/com/example/demo/SearchRequest.java
 package com.example.demo;
 
 import java.util.List;
@@ -7,6 +6,15 @@ public class SearchRequest {
     private String searchTerm;
     private List<String> dbTypes;
     private List<String> databases;
+
+    // Constructors
+    public SearchRequest() {}
+
+    public SearchRequest(String searchTerm, List<String> dbTypes, List<String> databases) {
+        this.searchTerm = searchTerm;
+        this.dbTypes = dbTypes;
+        this.databases = databases;
+    }
 
     // Getters and Setters
     public String getSearchTerm() {

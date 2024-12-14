@@ -1,32 +1,61 @@
 package com.example.demo;
 
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.SQLException;
-import java.sql.Statement;
-
 public class DatabaseConnection {
+    private String dbType;
+    private String databaseName;
+    private String url;
+    private String username;
+    private String password;
 
-    // Database URL, username, password
-    private static final String DB_URL = "jdbc:mysql://localhost:3306/"; // Replace with your DB URL
-    private static final String USER = "root"; // Replace with your DB username
-    private static final String PASSWORD = "Harshal@sql"; // Replace with your DB password
+    // Constructors
+    public DatabaseConnection() {}
 
-    public static void main(String[] args) {
-        // Establish the database connection
-        try (Connection connection = DriverManager.getConnection(DB_URL, USER, PASSWORD)) {
-            System.out.println("Connected to the database successfully!");
+    public DatabaseConnection(String dbType, String databaseName, String url, String username, String password) {
+        this.dbType = dbType;
+        this.databaseName = databaseName;
+        this.url = url;
+        this.username = username;
+        this.password = password;
+    }
 
-            // Perform a simple query or operation
-            String query = "SELECT * FROM ttry"; // Replace with your query
-            try (Statement statement = connection.createStatement()) {
-                statement.executeQuery(query);
-                System.out.println("Query executed successfully!");
-            }
+    // Getters and Setters
+    public String getDbType() {
+        return dbType;
+    }
 
-        } catch (SQLException e) {
-            System.out.println("An error occurred while connecting to the database.");
-            e.printStackTrace();
-        }
+    public void setDbType(String dbType) {
+        this.dbType = dbType;
+    }
+
+    public String getDatabaseName() {
+        return databaseName;
+    }
+
+    public void setDatabaseName(String databaseName) {
+        this.databaseName = databaseName;
+    }
+
+    public String getUrl() {
+        return url;
+    }
+
+    public void setUrl(String url) {
+        this.url = url;
+    }
+
+    public String getUsername() {
+        return username;
+    }
+
+    public void setUsername(String username) {
+        this.username = username;
+    }
+
+    public String getPassword() {
+        return password;
+    }
+
+    public void setPassword(String password) {
+        this.password = password;
     }
 }
