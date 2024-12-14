@@ -1,4 +1,4 @@
-// package com.example.demo;
+package com.example.demo;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -8,7 +8,7 @@ import java.sql.Statement;
 public class DatabaseConnection {
 
     // Database URL, username, password
-    private static final String DB_URL = "jdbc:mysql://localhost:3306/sqlexplorer"; // Replace with your DB URL
+    private static final String DB_URL = "jdbc:mysql://localhost:3306/"; // Replace with your DB URL
     private static final String USER = "root"; // Replace with your DB username
     private static final String PASSWORD = "Harshal@sql"; // Replace with your DB password
 

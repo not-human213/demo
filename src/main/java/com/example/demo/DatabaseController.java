@@ -1,344 +1,409 @@
 package com.example.demo;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
-import java.util.HashMap;
-import java.util.stream.Collectors;
-
-import javax.sql.DataSource;
-
-import java.util.List;
-import java.util.Map;
-import org.springframework.web.bind.annotation.RequestParam;
+import com.example.demo.DatabaseUtils.*;
+import java.util.*;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.ApplicationContext;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
 import org.springframework.http.ResponseEntity;
-import com.fasterxml.jackson.databind.ObjectMapper;
-
-import com.example.demo.DatabaseUtils;
-
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.http.MediaType;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.type.TypeReference;
-
-
+import com.example.demo.SearchRequest;
+import javax.sql.DataSource;
+import java.util.stream.Collectors;
+import java.sql.SQLException;
 
 @RestController
 public class DatabaseController {
 
-    @Autowired
+
     private JdbcTemplate jdbcTemplate;
 
-    @PostMapping("/api/show_tables")
-    public ResponseEntity<List<Map<String, Object>>> connectToDatabase() {
-        // Example: Test if the database connection is working
-        try {
-            String query = "SHOW TABLES;";
-            List<Map<String, Object>> rows = jdbcTemplate.queryForList(query);
+    @Autowired
+    private ApplicationContext applicationContext;
 
-            return ResponseEntity.ok(rows);
+    private final DatabaseUtils databaseUtils = new DatabaseUtils();
+    private final DatabaseConnectionService connectionService = databaseUtils.new DatabaseConnectionService();
+
+    @PostMapping("/api/connect")
+    public String connectToDatabase(@RequestBody DatabaseConnectionRequest request) {
+        try {
+            boolean isConnected = connectionService.testConnection(request);
+            if (isConnected) {
+                return "Connection to the " + request.getDbType() + " database successful!";
+            } else {
+                return "Failed to connect to the " + request.getDbType() + " database.";
+            }
+            
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(List.of(Map.of("error", "Failed to connect to database: " + e.getMessage())));
+            return "Error connecting to database: " + e.getMessage();
         }
     }
 
+
+        @PostMapping("/api/display_view")
+    public ResponseEntity<List<Map<String, Object>>> displayView(
+        @RequestParam String dbType,
+        @RequestParam String database,
+        @RequestParam String viewName) {
+        try {
+            DataSource dataSource = DatabaseUtils.getDataSource(dbType, database);
+            JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+    
+            String query = "SELECT * FROM " + viewName;
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(query);
+            return ResponseEntity.ok(rows);
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Collections.singletonList(
+                Map.of("error", "Failed to display view " + viewName + ": " + e.getMessage())));
+        }
+    }
+
+
+    @PostMapping("/api/show_views")
+    public ResponseEntity<List<Map<String, Object>>> showViews(
+        @RequestParam String dbType,
+        @RequestParam String database) {
+        try {
+            DataSource dataSource = DatabaseUtils.getDataSource(dbType, database);
+            JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+    
+            String query;
+            if (dbType.equalsIgnoreCase("postgres")) {
+                query = "SELECT table_name FROM information_schema.views WHERE table_schema = 'public'";
+            } else {
+                query = "SHOW FULL TABLES IN " + database + " WHERE TABLE_TYPE LIKE 'VIEW'";
+            }
+    
+            List<Map<String, Object>> views = jdbcTemplate.queryForList(query);
+            return ResponseEntity.ok(views);
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Collections.singletonList(
+                Map.of("error", "Failed to show views: " + e.getMessage())));
+        }
+    }
+
+    @PostMapping("/api/show_tables")
+public ResponseEntity<List<Map<String, Object>>> showTables(
+    @RequestParam String dbType,
+    @RequestParam String database) {
+    try {
+        DataSource dataSource = DatabaseUtils.getDataSource(dbType, database);
+        JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+
+        String query = "SHOW TABLES";
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(query);
+        return ResponseEntity.ok(rows);
+    } catch (Exception e) {
+        return ResponseEntity.status(500).body(Collections.singletonList(Map.of("error", "Failed to show tables: " + e.getMessage())));
+    }
+}
 
     @RequestMapping("/api/select")
-    public ResponseEntity<List<Map<String, Object>>> selectFromTable(@RequestParam String tableName) {
+    public ResponseEntity<List<Map<String, Object>>> selectFromTable(@RequestParam String tableName, @RequestParam String dbType, @RequestParam String database) {
         try {
-            String query = "SELECT * FROM " + tableName + ";";
-            List<Map<String, Object>> rows = jdbcTemplate.queryForList(query);
-
-            return ResponseEntity.ok(rows);
-        } catch (Exception e) {
-            return ResponseEntity.status(500).body(List.of(Map.of("error", "Failed to connect to database: " + e.getMessage())));
-        }
-    }
-
-    @PostMapping("/api/insert")
-    public ResponseEntity<List<Map<String, Object>>> insertIntoTable(
-        @RequestParam String tableName,
-        @RequestParam String jsonValues) {  // Accept JSON as a string in form-data
-    try {
-        // Convert the JSON string to a map (or a list of maps depending on your needs)
-        ObjectMapper objectMapper = new ObjectMapper();
-        List<Object> values = objectMapper.readValue(jsonValues, List.class);
-
-        // Use placeholders for the values
-        String placeholders = String.join(",", values.stream().map(v -> "?").toArray(String[]::new));
-        String query = "INSERT INTO " + tableName + " VALUES (" + placeholders + ")";
-
-        // Execute the query
-        jdbcTemplate.update(query, values.toArray());
-
-        return ResponseEntity.ok(List.of(Map.of("message", "Successfully inserted into table " + tableName)));
-    } catch (Exception e) {
-        return ResponseEntity.status(500).body(List.of(Map.of("error", "Failed to insert into database: " + e.getMessage())));
-    }
-}
-
-
-@PostMapping(value = "/api/update", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-public ResponseEntity<List<Map<String, Object>>> updateTable(
-    @RequestParam("tableName") String tableName,
-    @RequestParam("jsonValues") String jsonValues,
-    @RequestParam("id") int id
-) {
-    try {
-        // Parse JSON values
-        ObjectMapper objectMapper = new ObjectMapper();
-        List<Map<String, Object>> values = objectMapper.readValue(jsonValues, new TypeReference<List<Map<String, Object>>>() {});
-
-        // Update table logic
-        // Example: Construct placeholders and execute the update query
-        StringBuilder updateQuery = new StringBuilder("UPDATE " + tableName + " SET ");
-        values.forEach(entry -> 
-            entry.forEach((key, value) -> updateQuery.append(key + " = ?, "))
-        );
-        updateQuery.delete(updateQuery.length() - 2, updateQuery.length()); // Remove last comma
-        updateQuery.append(" WHERE id = ?");
-        
-        // Execute query
-        List<Object> parameters = new ArrayList<>(values.get(0).values());
-        parameters.add(id);
-        jdbcTemplate.update(updateQuery.toString(), parameters.toArray());
-
-        return ResponseEntity.ok(List.of(Map.of("message", "Successfully updated table " + tableName)));
-    } catch (Exception e) {
-        return ResponseEntity.status(500).body(List.of(Map.of("error", "Failed to update database: " + e.getMessage())));
-    }
-}
-
-
-@PostMapping(value = "/api/delete")
-    public ResponseEntity<List<Map<String, Object>>> deleteFromTable(
-            @RequestParam("tableName") String tableName,
-            @RequestParam("id") int id) {
-        try {
-            // Build SQL query to delete record
-            String query = "DELETE FROM " + tableName + " WHERE id = ?";
-
-            // Execute query
-            int rowsAffected = jdbcTemplate.update(query, id);
-
-            if (rowsAffected > 0) {
-                return ResponseEntity.ok(List.of(Map.of("message", "Successfully deleted from table " + tableName)));
-            } else {
-                return ResponseEntity.status(404).body(List.of(Map.of("error", "Record with id " + id + " not found")));
+            switch (dbType.toLowerCase()) {
+                case "mysql":
+                    jdbcTemplate = mysqlJdbcTemplate;
+                    break;
+                case "postgres":
+                    jdbcTemplate = postgresJdbcTemplate;
+                    break;
+                case "mariadb":
+                    jdbcTemplate = mariadbJdbcTemplate;
+                    break;
+                default:
+                    return ResponseEntity.status(400).body(Collections.singletonList(Map.of("error", "Unsupported database type: " + dbType)));
             }
 
+            String query = "SELECT * FROM " + tableName + ";";
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(query);
+            return ResponseEntity.ok(rows);
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(List.of(Map.of("error", "Failed to delete from database: " + e.getMessage())));
+            return ResponseEntity.status(500).body(Collections.singletonList(Map.of("error", "Failed to query table " + tableName + ": " + e.getMessage())));
         }
     }
+
 
 
 
     @PostMapping("/api/test-connection")
-    public String testDatabaseConnection() {
-    try {
-        jdbcTemplate.queryForObject("SELECT 1", Integer.class);
-        return "Database connection successful!";
-    } catch (Exception e) {
-        return "Database connection failed: " + e.getMessage();
+    public String testDatabaseConnection(@RequestParam String dbType) {
+        try {
+            switch (dbType.toLowerCase()) {
+                case "mysql":
+                    jdbcTemplate = mysqlJdbcTemplate;
+                    break;
+                case "postgres":
+                    jdbcTemplate = postgresJdbcTemplate;
+                    break;
+                case "mariadb":
+                    jdbcTemplate = mariadbJdbcTemplate;
+                    break;
+                default:
+                    return "Unsupported database type: " + dbType;
+            }
+
+            jdbcTemplate.queryForObject("SELECT 1", Integer.class);
+            return "Database connection successful!";
+        } catch (Exception e) {
+            return "Database connection failed: " + e.getMessage();
+        }
     }
-}
 
-// public ResponseEntity<List<Map<String, Object>>> searchDatabase(
-//             @RequestParam String selectedDb,
-//             @RequestParam String searchTerm) {
-//         try {
-//             // Get the correct DataSource based on selectedDb
-//             DataSource dataSource = DatabaseUtils.getDataSource(selectedDb);
-//             JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+    
+    @Autowired
+    @Qualifier("mysqlJdbcTemplate")
+    private JdbcTemplate mysqlJdbcTemplate;
 
-//             // Fetch all table names
-//             List<String> tables = DatabaseUtils.getAllTables(dataSource);
+    @Autowired
+    @Qualifier("postgresJdbcTemplate")
+    private JdbcTemplate postgresJdbcTemplate;
 
-//             // For each table, build a query to search all columns for the search term
-//             List<Map<String, Object>> searchResults = tables.stream()
-//                     .flatMap(table -> searchInTable(table, searchTerm, jdbcTemplate).stream())
-//                     .collect(Collectors.toList());
-
-//             return ResponseEntity.ok(searchResults);
-//         } catch (Exception e) {
-//             return ResponseEntity.status(500).body(List.of(Map.of("error", "Failed to search database: " + e.getMessage())));
-//         }
-//     }
-
-//     private List<Map<String, Object>> searchInTable(String tableName, String searchTerm, JdbcTemplate jdbcTemplate) {
-//         try {
-//             // Get columns for the current table
-//             String getColumnsQuery = "DESCRIBE " + tableName;
-//             List<Map<String, Object>> columns = jdbcTemplate.queryForList(getColumnsQuery);
-
-//             // Create a query that searches the entire table for the search term in all columns
-//             StringBuilder query = new StringBuilder("SELECT * FROM " + tableName + " WHERE ");
-//             columns.stream()
-//                     .map(column -> column.get("Field").toString())
-//                     .forEach(column -> query.append(column).append(" LIKE ? OR "));
-//             query.delete(query.length() - 3, query.length()); // Remove the last " OR "
-
-//             // Execute the query with the search term
-//             List<Map<String, Object>> rows = jdbcTemplate.queryForList(query.toString(), "%" + searchTerm + "%");
-//             return rows;
-//         } catch (Exception e) {
-//             throw new RuntimeException("Failed to search in table " + tableName + ": " + e.getMessage());
-//         }
-//     }
+    @Autowired
+    @Qualifier("mariadbJdbcTemplate")
+    private JdbcTemplate mariadbJdbcTemplate;
 
     @PostMapping("/api/search")
-    public Map<String, Object> searchDatabase(
-    @RequestParam(required = false) List<String> databaseNames,
-    @RequestParam(required = false) List<String> tableNames,
-    @RequestParam(required = false) List<String> columnNames,
-    @RequestParam String searchTerm) {
-    try {
-        Map<String, Object> result = new HashMap<>();
+    public ResponseEntity<Map<String, Object>> search(@RequestBody SearchRequest request) {
+        try {
+            String searchTerm = request.getSearchTerm();
+            List<String> dbTypes = (request.getDbTypes() != null && !request.getDbTypes().isEmpty())
+                    ? request.getDbTypes()
+                    : Arrays.asList("mysql", "postgres", "mariadb");
+            List<String> databases = request.getDatabases();
 
-        // Step 1: Get all databases if none are specified
-        List<String> allDatabases = getDatabases();
-        if (databaseNames == null || databaseNames.isEmpty()) {
-            databaseNames = allDatabases; // Search all databases
+            List<Map<String, Object>> results = new ArrayList<>();
+
+            for (String dbType : dbTypes) {
+                List<String> dbList = (databases != null && !databases.isEmpty())
+                        ? databases
+                        : getAllDatabases(dbType);
+
+                for (String database : dbList) {
+                    JdbcTemplate jdbcTemplate = getJdbcTemplate(dbType, database);
+                    results.addAll(searchInDatabase(jdbcTemplate, searchTerm, dbType, database));
+                }
+            }
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("results", results);
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            return ResponseEntity.status(500)
+                    .body(Collections.singletonMap("error", "Failed to perform search: " + e.getMessage()));
+        }
+    }
+
+    private JdbcTemplate getJdbcTemplate(String dbType, String database) {
+        DataSource dataSource = DatabaseUtils.getDataSource(dbType, database);
+        return new JdbcTemplate(dataSource);
+    }
+
+    private List<String> getAllDatabases(String dbType) {
+        try {
+            JdbcTemplate jdbcTemplate;
+            switch (dbType.toLowerCase()) {
+                case "mysql":
+                    jdbcTemplate = mysqlJdbcTemplate;
+                    break;
+                case "postgres":
+                    jdbcTemplate = postgresJdbcTemplate;
+                    break;
+                case "mariadb":
+                    jdbcTemplate = mariadbJdbcTemplate;
+                    break;
+                default:
+                    return Collections.emptyList();
+            }
+
+            String query;
+            if (dbType.equalsIgnoreCase("postgres")) {
+                query = "SELECT datname FROM pg_database WHERE datistemplate = false";
+                return jdbcTemplate.queryForList(query, String.class);
+            } else {
+                query = "SHOW DATABASES";
+                List<String> databases = jdbcTemplate.queryForList(query, String.class);
+                databases.removeIf(db -> db.equalsIgnoreCase("information_schema") ||
+                                         db.equalsIgnoreCase("mysql") ||
+                                         db.equalsIgnoreCase("performance_schema"));
+                return databases;
+            }
+
+        } catch (Exception e) {
+            System.err.println("Failed to retrieve databases for " + dbType + ": " + e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+        private List<Map<String, Object>> searchInDatabase(JdbcTemplate jdbcTemplate, String searchTerm, String dbType, String database) {
+        List<Map<String, Object>> results = new ArrayList<>();
+    
+        List<String> objectsToSearch = getAllTablesAndViews(jdbcTemplate, database, dbType);
+    
+        for (String objectName : objectsToSearch) {
+            List<String> columns = getColumnNames(jdbcTemplate, objectName, database);
+            if (columns.isEmpty()) {
+                continue;
+            }
+    
+            String conditions = columns.stream()
+                .map(column -> column + " LIKE ?")
+                .collect(Collectors.joining(" OR "));
+    
+            String query = "SELECT * FROM " + objectName + " WHERE " + conditions;
+            Object[] params = new Object[columns.size()];
+            Arrays.fill(params, "%" + searchTerm + "%");
+    
+            try {
+                List<Map<String, Object>> rows = jdbcTemplate.queryForList(query, params);
+                for (Map<String, Object> row : rows) {
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("dbType", dbType);
+                    result.put("database", database);
+                    result.put("object", objectName);
+                    result.put("row", row);
+                    results.add(result);
+                }
+            } catch (Exception e) {
+                System.err.println("Failed to search in " + objectName + ": " + e.getMessage());
+            }
+        }
+    
+        return results;
+    }
+
+    private List<String> getAllTablesAndViews(JdbcTemplate jdbcTemplate, String database, String dbType) {
+        String query;
+        if (dbType.equalsIgnoreCase("postgres")) {
+            query = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND (table_type = 'BASE TABLE' OR table_type = 'VIEW')";
+            return jdbcTemplate.queryForList(query, String.class);
         } else {
-            // Ensure the specified databases exist
-            databaseNames = databaseNames.stream()
-                                         .filter(allDatabases::contains)
-                                         .collect(Collectors.toList());
-        }
-
-        result.put("databases", databaseNames);
-
-        // Step 2: Prepare results container
-        Map<String, Map<String, List<Map<String, Object>>>> values = new HashMap<>();
-
-        // Step 3: Iterate over each database
-        for (String database : databaseNames) {
-            jdbcTemplate.execute("USE " + database);
-
-            Map<String, List<Map<String, Object>>> dbValues = new HashMap<>();
-            List<String> allTables = getTables();
-
-            // Get tables (filter by provided tableNames if present)
-            List<String> selectedTables = (tableNames == null || tableNames.isEmpty())
-                    ? allTables
-                    : allTables.stream()
-                               .filter(table -> tableNames.contains(table))
-                               .collect(Collectors.toList());
-
-            for (String table : selectedTables) {
-                // Step 4: Search for values
-                List<Map<String, Object>> matchingValues;
-
-                if (columnNames != null && !columnNames.isEmpty()) {
-                    // Search in specific columns
-                    matchingValues = new ArrayList<>();
-                    for (String column : columnNames) {
-                        List<Map<String, Object>> columnMatches = searchValuesInColumn(table, column, searchTerm);
-                        matchingValues.addAll(columnMatches);
+            query = "SHOW FULL TABLES IN " + database + " WHERE TABLE_TYPE LIKE '%TABLE%' OR TABLE_TYPE LIKE '%VIEW%'";
+            List<Map<String, Object>> results = jdbcTemplate.queryForList(query);
+            List<String> tablesAndViews = new ArrayList<>();
+            for (Map<String, Object> row : results) {
+                for (Object value : row.values()) {
+                    if (value != null) {
+                        tablesAndViews.add(value.toString());
+                        break;
                     }
-                } else {
-                    // Search in all columns
-                    matchingValues = searchValuesInTable(table, searchTerm);
                 }
+            }
+            return tablesAndViews;
+        }
+    }
 
-                // Add results for this table
-                if (!matchingValues.isEmpty()) {
-                    dbValues.put(table, matchingValues);
+        private List<String> getColumnNames(JdbcTemplate jdbcTemplate, String objectName, String database) {
+        String query = "SELECT column_name FROM information_schema.columns WHERE table_name = ? AND table_schema = ?";
+        try {
+            return jdbcTemplate.queryForList(query, String.class, objectName, database);
+        } catch (Exception e) {
+            System.err.println("Failed to retrieve columns from " + objectName + ": " + e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+
+
+@PostMapping("/api/get_schema")
+public ResponseEntity<Map<String, Object>> getSchema(
+    @RequestParam String dbType,
+    @RequestParam String database) {
+    try {
+        DataSource dataSource = DatabaseUtils.getDataSource(dbType, database);
+        JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+
+        Map<String, Object> schema = new HashMap<>();
+
+        List<String> tables;
+
+        if (dbType.equalsIgnoreCase("postgres")) {
+            tables = jdbcTemplate.queryForList(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND (table_type = 'BASE TABLE' OR table_type = 'VIEW')",
+                String.class);
+        } else {
+            tables = jdbcTemplate.queryForList(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = ? AND (table_type = 'BASE TABLE' OR table_type = 'VIEW')",
+                String.class, database);
+        }
+
+        List<Map<String, Object>> tablesInfo = new ArrayList<>();
+
+        for (String table : tables) {
+            Map<String, Object> tableInfo = new HashMap<>();
+            tableInfo.put("tableName", table);
+
+            List<Map<String, Object>> columns;
+            if (dbType.equalsIgnoreCase("postgres")) {
+                columns = jdbcTemplate.queryForList(
+                    "SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = 'public' AND table_name = ?",
+                    table);
+            } else {
+                columns = jdbcTemplate.queryForList(
+                    "SELECT column_name, data_type, column_key FROM information_schema.columns WHERE table_schema = ? AND table_name = ?",
+                    database, table);
+            }
+
+            tableInfo.put("columns", columns);
+
+            // Get primary keys
+            List<String> primaryKeys = new ArrayList<>();
+            if (dbType.equalsIgnoreCase("postgres")) {
+                List<Map<String, Object>> primaryKeyRows = jdbcTemplate.queryForList(
+                    "SELECT a.attname AS column_name FROM pg_index i " +
+                    "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) " +
+                    "WHERE i.indrelid = ?::regclass AND i.indisprimary",
+                    table);
+                for (Map<String, Object> row : primaryKeyRows) {
+                    primaryKeys.add((String) row.get("column_name"));
+                }
+            } else {
+                List<Map<String, Object>> primaryKeyRows = jdbcTemplate.queryForList(
+                    "SELECT column_name FROM information_schema.key_column_usage WHERE table_schema = ? AND table_name = ? AND constraint_name = 'PRIMARY'",
+                    database, table);
+                for (Map<String, Object> row : primaryKeyRows) {
+                    primaryKeys.add((String) row.get("column_name"));
                 }
             }
 
-            // Add results for this database
-            if (!dbValues.isEmpty()) {
-                values.put(database, dbValues);
+            tableInfo.put("primaryKeys", primaryKeys);
+
+            // Get foreign keys
+            List<Map<String, Object>> foreignKeys;
+            if (dbType.equalsIgnoreCase("postgres")) {
+                foreignKeys = jdbcTemplate.queryForList(
+                    "SELECT kcu.column_name, ccu.table_name AS referenced_table_name, ccu.column_name AS referenced_column_name " +
+                    "FROM information_schema.key_column_usage kcu " +
+                    "JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = kcu.constraint_name " +
+                    "WHERE kcu.table_schema = 'public' AND kcu.table_name = ? AND ccu.table_schema = 'public'",
+                    table);
+            } else {
+                foreignKeys = jdbcTemplate.queryForList(
+                    "SELECT column_name, referenced_table_name, referenced_column_name " +
+                    "FROM information_schema.key_column_usage " +
+                    "WHERE table_schema = ? AND table_name = ? AND referenced_table_name IS NOT NULL",
+                    database, table);
             }
+
+            tableInfo.put("foreignKeys", foreignKeys);
+
+            tablesInfo.add(tableInfo);
         }
 
-        // Add non-empty values to the response
-        if (!values.isEmpty()) {
-            result.put("values", values);
-        }
+        schema.put("tables", tablesInfo);
 
-        return result;
+        return ResponseEntity.ok(schema);
 
     } catch (Exception e) {
-        return Map.of("error", "Search failed: " + e.getMessage());
+        e.printStackTrace(); // Log the full stack trace
+        return ResponseEntity.status(500)
+            .body(Collections.singletonMap("error", "Failed to retrieve schema: " + e.getMessage()));
     }
 }
-
-
-    private List<String> getDatabases() {
-        String query = "SHOW DATABASES";
-        List<Map<String, Object>> databases = jdbcTemplate.queryForList(query);
-    
-        // Exclude system databases
-        List<String> excludedDatabases = List.of("information_schema", "mysql", "performance_schema", "sys");
-        return databases.stream()
-                .map(db -> db.get("Database").toString())
-                .filter(db -> !excludedDatabases.contains(db))
-                .collect(Collectors.toList());
-    }
-
-    private List<Map<String, Object>> searchValuesInColumn(String tableName, String columnName, String searchTerm) {
-        String query = String.format("SELECT * FROM %s WHERE %s LIKE ?", tableName, columnName);
-        try {
-            return jdbcTemplate.queryForList(query, "%" + searchTerm + "%");
-        } catch (Exception e) {
-            // Log error or return empty list if the column doesn't exist
-            return new ArrayList<>();
-        }
-    }
-    
-    
-
-    private List<String> getTables() {
-        String query = "SHOW TABLES";
-        List<Map<String, Object>> result = jdbcTemplate.queryForList(query);
-        return result.stream()
-                .flatMap(table -> table.values().stream())
-                .map(Object::toString)
-                .collect(Collectors.toList());
-    }
-
-private List<String> getTableColumns(String tableName) {
-    String query = "SHOW COLUMNS FROM " + tableName;
-    List<Map<String, Object>> columns = jdbcTemplate.queryForList(query);
-
-    return columns.stream()
-            .map(column -> column.get("Field").toString())
-            .collect(Collectors.toList());
 }
-
-
-    private List<Map<String, Object>> searchValuesInTable(String tableName, String searchTerm) {
-        String query = "SELECT * FROM " + tableName + " WHERE ";
-        List<String> columns = getTableColumns(tableName);
-        List<String> conditions = new ArrayList<>();
-    
-        // Add a condition for each column to check the search term
-        for (String column : columns) {
-            conditions.add(column + " LIKE ?");
-        }
-    
-        // Combine conditions with OR
-        query += String.join(" OR ", conditions);
-    
-        // Prepare query parameters
-        Object[] params = new Object[columns.size()];
-        Arrays.fill(params, "%" + searchTerm + "%");
-    
-        // Execute the query
-        try {
-            return jdbcTemplate.queryForList(query, params);
-        } catch (Exception e) {
-            // Log or handle exception (e.g., if a column cannot be searched)
-            return new ArrayList<>();
-        }
-    }
-}
-
-    
