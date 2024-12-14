@@ -450,7 +450,7 @@ public ResponseEntity<Map<String, Object>> search(@RequestBody SearchRequest req
 
             for (String database : databases) {
                 // Get tables
-                List<String> tables = getTables(jdbcTemplate, dbType, database);
+                List<String> tables = getTablesAndViews(jdbcTemplate, dbType, database);
                 for (String table : tables) {
                     // Get columns
                     List<String> columns = getColumns(jdbcTemplate, dbType, database, table);
@@ -543,29 +543,45 @@ private List<String> getDatabases(JdbcTemplate jdbcTemplate, String dbType) {
  * @param database     The name of the database.
  * @return List of table names.
  */
-private List<String> getTables(JdbcTemplate jdbcTemplate, String dbType, String database) {
+private List<String> getTablesAndViews(JdbcTemplate jdbcTemplate, String dbType, String database) {
     String query = "";
+    List<String> tablesAndViews = new ArrayList<>();
     switch (dbType.toLowerCase()) {
         case "mysql":
         case "mariadb":
-            query = "SHOW TABLES FROM " + escapeIdentifier(database);
+            query = "SHOW FULL TABLES FROM " + escapeIdentifier(database);
+            try {
+                logger.debug("Executing getTablesAndViews query: {}", query);
+                List<Map<String, Object>> results = jdbcTemplate.queryForList(query);
+                String tableNameKey = "Tables_in_" + database;
+                String tableTypeKey = "Table_type";
+                for (Map<String, Object> row : results) {
+                    String name = (String) row.get(tableNameKey);
+                    tablesAndViews.add(name);
+                }
+            } catch (Exception e) {
+                logger.error("Error retrieving tables and views for database {}: {}", database, e.getMessage());
+            }
             break;
         case "postgres":
-            query = "SELECT tablename FROM pg_tables WHERE schemaname = 'public'";
+            String tableQuery = "SELECT tablename FROM pg_tables WHERE schemaname = 'public'";
+            String viewQuery = "SELECT viewname FROM pg_views WHERE schemaname = 'public'";
+            try {
+                logger.debug("Executing getTables query: {}", tableQuery);
+                List<String> tables = jdbcTemplate.queryForList(tableQuery, String.class);
+                logger.debug("Executing getViews query: {}", viewQuery);
+                List<String> views = jdbcTemplate.queryForList(viewQuery, String.class);
+                tablesAndViews.addAll(tables);
+                tablesAndViews.addAll(views);
+            } catch (Exception e) {
+                logger.error("Error retrieving tables and views for database {}: {}", database, e.getMessage());
+            }
             break;
         default:
-            logger.warn("Unsupported dbType for getting tables: {}", dbType);
+            logger.warn("Unsupported dbType for getting tables and views: {}", dbType);
             return Collections.emptyList();
     }
-    try {
-        logger.debug("Executing getTables query: {}", query);
-        List<String> tables = jdbcTemplate.queryForList(query, String.class);
-        logger.debug("getTables returned {} tables from database {}.", tables.size(), database);
-        return tables;
-    } catch (Exception e) {
-        logger.error("Error retrieving tables for database {}: {}", database, e.getMessage());
-        return Collections.emptyList();
-    }
+    return tablesAndViews;
 }
 
     /**
