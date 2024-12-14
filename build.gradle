@@ -25,7 +25,6 @@ dependencies {
     implementation 'mysql:mysql-connector-java:8.0.30' 
     implementation 'org.springframework.boot:spring-boot-starter-jdbc'
     implementation 'org.mongodb:mongodb-driver-sync'
-    implementation 'mysql:mysql-connector-java'
     implementation 'org.springframework.boot:spring-boot-starter-web'
     // Add this dependency to support @ConfigurationProperties
     implementation 'org.springframework.boot:spring-boot-configuration-processor'
