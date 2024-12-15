@@ -20,9 +20,15 @@ import java.sql.*;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.nio.charset.StandardCharsets;
+import com.example.demo.UserService;
+import org.springframework.http.HttpStatus;
+import com.example.demo.User;
 
 @RestController
-@CrossOrigin(origins = {"http://localhost:3000", "https://sql.nothuman.lol", "http://192.168.0.101:3000"})
+@CrossOrigin(origins = "http://localhost:3000")
 public class DatabaseController {
 
     private static final Logger logger = LoggerFactory.getLogger(DatabaseController.class);
@@ -46,6 +52,9 @@ public class DatabaseController {
 
     private final DatabaseUtils databaseUtils = new DatabaseUtils();
     private final DatabaseConnectionService connectionService = databaseUtils.new DatabaseConnectionService();
+
+    @Autowired
+    private UserService userService;
 
     @PostMapping("/api/connect")
     public ResponseEntity<?> connectToDatabase(@RequestBody DatabaseConnectionRequest request) {
@@ -310,7 +319,7 @@ public class DatabaseController {
      * @param database The name of the database.
      * @return A ResponseEntity containing a list of tables or an error message.
      */
-    @PostMapping("/api/show_tables")
+    @GetMapping("/api/show_tables")
     public ResponseEntity<?> showTables(
         @RequestParam String dbType,
         @RequestParam String database) {
@@ -798,10 +807,8 @@ private Map<String, List<String>> getFilters() {
         }
     }
 
-    @PostMapping("/api/get_schemarelation")
-    public ResponseEntity<Map<String, Object>> getSchemaRelation(
-        @RequestParam String dbType,
-        @RequestParam String database) {
+    @GetMapping("/api/get_schemarelation")
+    public ResponseEntity<?> getSchemaRelation(@RequestParam String dbType, @RequestParam String database) {
         try {
             DataSource dataSource = DatabaseUtils.getDataSource(dbType);
             if (dataSource == null) {
@@ -810,91 +817,130 @@ private Map<String, List<String>> getFilters() {
             }
 
             JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
-
-            Map<String, Object> schema = new HashMap<>();
-
-            List<Map<String, Object>> tables;
-
-            if (dbType.equalsIgnoreCase("postgres")) {
-                tables = jdbcTemplate.queryForList(
-                    "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND (table_type = 'BASE TABLE' OR table_type = 'VIEW')");
-            } else {
-                tables = jdbcTemplate.queryForList(
-                    "SELECT table_name FROM information_schema.tables WHERE table_schema = ? AND (table_type = 'BASE TABLE' OR table_type = 'VIEW')",
-                    database);
-            }
-
-            List<String> tableNames = tables.stream()
-                .map(table -> (String) table.get("table_name"))
-                .collect(Collectors.toList());
-
             List<Map<String, Object>> tablesInfo = new ArrayList<>();
 
-            for (String table : tableNames) {
+            // Query to get tables
+            String tableQuery = "SELECT table_name FROM information_schema.tables WHERE table_schema = ?";
+            List<String> tableNames = jdbcTemplate.queryForList(tableQuery, String.class, database);
+
+            for (String tableName : tableNames) {
                 Map<String, Object> tableInfo = new HashMap<>();
-                tableInfo.put("tableName", table);
+                tableInfo.put("tableName", tableName);
 
-                List<Map<String, Object>> columns;
-                if (dbType.equalsIgnoreCase("postgres")) {
-                    columns = jdbcTemplate.queryForList(
-                        "SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = 'public' AND table_name = ?",
-                        table);
-                } else {
-                    columns = jdbcTemplate.queryForList(
-                        "SELECT column_name, data_type, column_key FROM information_schema.columns WHERE table_schema = ? AND table_name = ?",
-                        database, table);
-                }
+                // Query to get columns
+                String columnQuery = "SELECT COLUMN_NAME, DATA_TYPE, COLUMN_KEY FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?";
+                List<Map<String, Object>> columns = jdbcTemplate.queryForList(columnQuery, database, tableName);
 
-                tableInfo.put("columns", columns);
-
-                // Get primary keys
-                List<String> primaryKeys;
-                if (dbType.equalsIgnoreCase("postgres")) {
-                    primaryKeys = jdbcTemplate.queryForList(
-                        "SELECT a.attname AS column_name FROM pg_index i " +
-                        "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) " +
-                        "WHERE i.indrelid = ?::regclass AND i.indisprimary",
-                        String.class,
-                        table);
-                } else {
-                    primaryKeys = jdbcTemplate.queryForList(
-                        "SELECT column_name FROM information_schema.key_column_usage WHERE table_schema = ? AND table_name = ? AND constraint_name = 'PRIMARY'",
-                        database, table)
-                        .stream()
-                        .map(row -> (String) row.get("column_name"))
+                // Normalize column names for consistent output
+                List<Map<String, Object>> normalizedColumns = columns.stream()
+                        .map(column -> {
+                            Map<String, Object> normalizedColumn = new HashMap<>();
+                            normalizedColumn.put("column_name", column.get("COLUMN_NAME") != null ? column.get("COLUMN_NAME") : column.get("column_name"));
+                            normalizedColumn.put("data_type", column.get("DATA_TYPE") != null ? column.get("DATA_TYPE") : column.get("data_type"));
+                            normalizedColumn.put("column_key", column.get("COLUMN_KEY") != null ? column.get("COLUMN_KEY") : column.get("column_key"));
+                            return normalizedColumn;
+                        })
                         .collect(Collectors.toList());
+
+                // Query to get foreign key information
+                String foreignKeyQuery = "SELECT kcu.COLUMN_NAME, kcu.REFERENCED_TABLE_NAME, kcu.REFERENCED_COLUMN_NAME " +
+                                         "FROM information_schema.KEY_COLUMN_USAGE kcu " +
+                                         "WHERE kcu.TABLE_SCHEMA = ? AND kcu.TABLE_NAME = ? AND kcu.REFERENCED_TABLE_NAME IS NOT NULL";
+                List<Map<String, Object>> foreignKeys = jdbcTemplate.queryForList(foreignKeyQuery, database, tableName);
+
+                // Add foreign key information to columns
+                for (Map<String, Object> foreignKey : foreignKeys) {
+                    String columnName = (String) foreignKey.get("COLUMN_NAME");
+                    String referencedTable = (String) foreignKey.get("REFERENCED_TABLE_NAME");
+                    String referencedColumn = (String) foreignKey.get("REFERENCED_COLUMN_NAME");
+
+                    normalizedColumns.stream()
+                            .filter(col -> col.get("column_name").equals(columnName))
+                            .findFirst()
+                            .ifPresent(col -> {
+                                col.put("foreign_key", true);
+                                col.put("referenced_table", referencedTable);
+                                col.put("referenced_column", referencedColumn);
+                            });
                 }
 
-                tableInfo.put("primaryKeys", primaryKeys);
-
-                // Get foreign keys
-                List<Map<String, Object>> foreignKeys;
-                if (dbType.equalsIgnoreCase("postgres")) {
-                    foreignKeys = jdbcTemplate.queryForList(
-                        "SELECT kcu.column_name, ccu.table_name AS referenced_table_name, ccu.column_name AS referenced_column_name " +
-                        "FROM information_schema.key_column_usage kcu " +
-                        "JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = kcu.constraint_name " +
-                        "WHERE kcu.table_schema = 'public' AND kcu.table_name = ? AND ccu.table_schema = 'public'",
-                        table);
-                } else {
-                    foreignKeys = jdbcTemplate.queryForList(
-                        "SELECT column_name, referenced_table_name, referenced_column_name " +
-                        "FROM information_schema.key_column_usage " +
-                        "WHERE table_schema = ? AND table_name = ? AND referenced_table_name IS NOT NULL",
-                        database, table);
-                }
-
-                tableInfo.put("foreignKeys", foreignKeys);
-
+                tableInfo.put("columns", normalizedColumns);
                 tablesInfo.add(tableInfo);
             }
 
-            schema.put("tables", tablesInfo);
-
-            return ResponseEntity.ok(schema);
-
+            return ResponseEntity.ok(Collections.singletonMap("tables", tablesInfo));
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(Collections.singletonMap("error", "Failed to retrieve schema: " + e.getMessage()));
+            return ResponseEntity.status(500)
+                    .body(Collections.singletonMap("error", "Failed to retrieve schema relation: " + e.getMessage()));
         }
+    }
+
+    @PostMapping("/api/signup")
+    public ResponseEntity<?> signup(@RequestBody User user) {
+        try {
+            // Hash the password using SHA-256
+            String hashedPassword = hashPassword(user.getPassword());
+            user.setPassword(hashedPassword); // Set the hashed password
+
+            // Save the user to the database
+            userService.saveUser(user); // Implement this method in UserService
+
+            return ResponseEntity.ok(Collections.singletonMap("message", "User registered successfully."));
+        } catch (Exception e) {
+            return ResponseEntity.status(500)
+                    .body(Collections.singletonMap("error", "Failed to register user: " + e.getMessage()));
+        }
+    }
+
+    @PostMapping("/api/login")
+    public ResponseEntity<?> login(@RequestBody User user) {
+        try {
+            // Debugging: Log the incoming user object
+            System.out.println("Login attempt for user: " + user.getUsername());
+
+            // Check if the user object is valid
+            if (user.getUsername() == null || user.getPassword() == null) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body(Collections.singletonMap("error", "Username and password are required."));
+            }
+
+            // Check if the user exists in the database
+            String username = user.getUsername();
+            User existingUser = userService.findByUsername(username);
+            if (existingUser == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Collections.singletonMap("error", "Invalid credentials."));
+            }
+
+            // Hash the input password and compare
+            String hashedInputPassword = hashPassword(user.getPassword());
+            if (!hashedInputPassword.equals(existingUser.getPassword())) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Collections.singletonMap("error", "Invalid credentials."));
+            }
+
+            return ResponseEntity.ok(Collections.singletonMap("message", "Login successful."));
+        } catch (Exception e) {
+            return ResponseEntity.status(500)
+                    .body(Collections.singletonMap("error", "Failed to login: " + e.getMessage()));
+        }
+    }
+
+    private String hashPassword(String password) throws NoSuchAlgorithmException {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] encodedHash = digest.digest(password.getBytes(StandardCharsets.UTF_8));
+        return bytesToHex(encodedHash);
+    }
+
+    private String bytesToHex(byte[] hash) {
+        StringBuilder hexString = new StringBuilder(2 * hash.length);
+        for (byte b : hash) {
+            String hex = Integer.toHexString(0xff & b);
+            if (hex.length() == 1) {
+                hexString.append('0');
+            }
+            hexString.append(hex);
+        }
+        return hexString.toString();
     }
 }
