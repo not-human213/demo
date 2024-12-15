@@ -22,7 +22,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @RestController
-@CrossOrigin(origins = {"http://localhost:3000", "https://sql.nothuman.lol"})
+@CrossOrigin(origins = {"http://localhost:3000", "https://sql.nothuman.lol", "http://192.168.0.101:3000"})
 public class DatabaseController {
 
     private static final Logger logger = LoggerFactory.getLogger(DatabaseController.class);
@@ -54,6 +54,7 @@ public class DatabaseController {
         String username = request.getUsername();
         String password = request.getPassword();
 
+        System.out.println("connectToDatabase called");
         // Validate required fields
         if (dbType == null || port == null || username == null || password == null ||
             dbType.isEmpty() || username.isEmpty() || password.isEmpty()) {
@@ -897,5 +898,3 @@ private Map<String, List<String>> getFilters() {
         }
     }
 }
-
-
